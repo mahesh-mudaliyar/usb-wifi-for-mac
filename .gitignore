@@ -1,0 +1,10 @@
+# macOS
+.DS_Store
+# never commit secrets, logs, backups or disk images
+claude-key
+claude-key.pub
+*.log
+*.tar.gz
+*.iso
+*.vmdk
+*.vmwarevm/

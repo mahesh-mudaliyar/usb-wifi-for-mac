@@ -1,0 +1,14 @@
+#!/bin/sh
+# Prints nearby networks as: signal|secured|name   (strongest first, one line per name)
+ip link set wlan0 up 2>/dev/null
+for _ in 1 2 3 4 5; do
+  out=$(iw dev wlan0 scan 2>/dev/null) && [ -n "$out" ] && break
+  sleep 2   # "device busy" while connecting: try again
+done
+echo "$out" | awk "
+  /^BSS / { if (ssid!=\"\") print sig\"|\"sec\"|\"ssid; ssid=\"\"; sig=-100; sec=\"open\" }
+  /signal:/ { sig=int(\$2) }
+  /RSN:|WPA:/ { sec=\"locked\" }
+  /SSID: / { sub(/^[ \t]*SSID: /, \"\"); ssid=\$0 }
+  END { if (ssid!=\"\") print sig\"|\"sec\"|\"ssid }
+" | sort -t"|" -k1,1nr | awk -F"|" "!seen[\$3]++"

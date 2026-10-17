@@ -1,0 +1,10 @@
+Host alp
+  HostName __ALPINE_IP__
+  User root
+  IdentityFile "__VM_DIR__/claude-key"
+  IdentitiesOnly yes
+  BatchMode yes
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  ConnectTimeout 8
+  LogLevel ERROR

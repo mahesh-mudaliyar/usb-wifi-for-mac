@@ -1,0 +1,24 @@
+#!/bin/sh
+# Runs every minute. Keeps Alpine on Wi-Fi, stepping up repairs if it stays down.
+C=/run/wifi-keepalive.fails
+linked() { iw dev wlan0 link 2>/dev/null | grep -q Connected && ip -4 addr show wlan0 2>/dev/null | grep -q inet; }
+online() { ping -c1 -W3 1.1.1.1 >/dev/null 2>&1 || ping -c1 -W3 8.8.8.8 >/dev/null 2>&1; }
+if linked; then
+  echo 0 > $C
+  online || logger "wifi-keepalive: joined Wi-Fi but the network has no internet (router side)"
+  exit 0
+fi
+n=$(( $(cat $C 2>/dev/null || echo 0) + 1 )); echo $n > $C
+[ $n -eq 1 ] && exit 0            # first miss: a connection may still be in progress
+ifdown -f wlan0 >/dev/null 2>&1; killall wpa_supplicant 2>/dev/null; sleep 1
+if [ $n -ge 3 ] && [ -e /sys/class/net/wlan0/device ]; then
+  # adapter stuck (common after a warm restart): re-plug it in software
+  logger "wifi-keepalive: resetting Wi-Fi adapter (attempt $n)"
+  d=$(readlink -f /sys/class/net/wlan0/device/..)
+  echo 0 > "$d/authorized"; sleep 2; echo 1 > "$d/authorized"
+  for _ in $(seq 1 20); do [ -e /sys/class/net/wlan0 ] && break; sleep 1; done
+else
+  logger "wifi-keepalive: reconnecting Wi-Fi (attempt $n)"
+fi
+ifup wlan0 >/dev/null 2>&1
+exit 0

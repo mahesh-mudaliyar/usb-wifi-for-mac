@@ -1,0 +1,21 @@
+# setup-alpine answer file used by the Mac Wi-Fi installer (phase 1).
+# __TIMEZONE__ and __ROOTSSHKEY__ are filled in on the Mac.
+KEYMAPOPTS="us us"
+HOSTNAMEOPTS="alpinewifi"
+DEVDOPTS=mdev
+INTERFACESOPTS="auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet dhcp
+"
+TIMEZONEOPTS="-z __TIMEZONE__"
+PROXYOPTS=none
+APKREPOSOPTS="-1 -c"
+USEROPTS=none
+SSHDOPTS=openssh
+ROOTSSHKEY="__ROOTSSHKEY__"
+NTPOPTS="chrony"
+DISKOPTS="-m sys /dev/nvme0n1"
+LBUOPTS=none
+APKCACHEOPTS=none

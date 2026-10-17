@@ -1,0 +1,37 @@
+#!/bin/sh
+# Reads the network name (line 1) and password (line 2, empty for open networks) from stdin.
+# Saves it alongside earlier networks (newest preferred) and connects.
+IFS= read -r SSID; IFS= read -r PASS
+CONF=/etc/wpa_supplicant/wpa_supplicant.conf
+[ -n "$SSID" ] || { echo "No network name given"; exit 1; }
+if [ -n "$PASS" ] && [ ${#PASS} -lt 8 ]; then echo "Password too short (Wi-Fi passwords are at least 8 characters)"; exit 1; fi
+grep -q "^ctrl_interface" $CONF 2>/dev/null || printf "ctrl_interface=/var/run/wpa_supplicant\nupdate_config=1\ncountry=IN\n" > $CONF.new && [ -f $CONF.new ] && cat $CONF >> $CONF.new 2>/dev/null && mv $CONF.new $CONF
+# drop any older entry for this network, keep the others
+awk -v s="$SSID" "
+  /^network=\{/ { blk=\$0; inb=1; next }
+  inb { blk=blk\"\n\"\$0; if (\$0 ~ /^\}/) { inb=0; if (index(blk, \"ssid=\\\"\" s \"\\\"\")==0) print blk } ; next }
+  { print }
+" $CONF > $CONF.tmp && mv $CONF.tmp $CONF
+top=$(grep -o "priority=[0-9]*" $CONF | cut -d= -f2 | sort -n | tail -1); prio=$(( ${top:-0} + 1 ))
+if [ -n "$PASS" ]; then
+  wpa_passphrase "$SSID" "$PASS" | grep -v "#psk=" | sed "s/^}/\tpriority=$prio\n}/" >> $CONF
+else
+  printf "network={\n\tssid=\"%s\"\n\tkey_mgmt=NONE\n\tpriority=%s\n}\n" "$SSID" "$prio" >> $CONF
+fi
+chmod 600 $CONF
+echo "0" > /run/wifi-keepalive.fails
+ifdown -f wlan0 >/dev/null 2>&1; killall wpa_supplicant 2>/dev/null; sleep 1
+ifup wlan0 >/dev/null 2>&1
+for _ in $(seq 1 30); do
+  iw dev wlan0 link 2>/dev/null | grep -q "SSID: $SSID" && ip -4 addr show wlan0 | grep -q inet && break
+  sleep 1
+done
+if ! iw dev wlan0 link 2>/dev/null | grep -q "SSID: $SSID"; then
+  echo "RESULT: could not join \"$SSID\" - the password may be wrong, or the signal too weak"; exit 2
+fi
+ip -4 addr show wlan0 | grep -q inet || { echo "RESULT: joined \"$SSID\" but got no address from the router"; exit 3; }
+if ping -c1 -W3 1.1.1.1 >/dev/null 2>&1 || ping -c1 -W3 8.8.8.8 >/dev/null 2>&1; then
+  echo "RESULT: connected to \"$SSID\" with internet"
+else
+  echo "RESULT: connected to \"$SSID\" but it has no internet (router or login page)"; exit 4
+fi

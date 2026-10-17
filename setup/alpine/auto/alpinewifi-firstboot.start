@@ -1,0 +1,10 @@
+#!/bin/sh
+# Phase 2: runs once, on the first boot from the new disk. Installs the Wi-Fi driver firmware and
+# the router setup, then powers off. install.sh deletes this file when it succeeds.
+S=/root/alpinewifi-setup
+[ -f "$S/install.sh" ] || exit 0
+[ -f /tmp/alpinewifi-firstboot.ran ] && exit 0
+touch /tmp/alpinewifi-firstboot.ran
+[ -f /root/alpinewifi-install.log ] && mv /root/alpinewifi-install.log /root/alpinewifi-install.log.prev
+FINISH=poweroff sh "$S/install.sh" < /dev/null
+exit 0
