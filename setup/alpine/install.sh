@@ -12,6 +12,7 @@ cd "$(dirname "$0")" || exit 1
 LOG=/root/alpinewifi-install.log
 ALPINE_IP=192.168.235.100
 HOST_NET=192.168.235.0/24
+ADAPTER_DRIVER=rtl8xxxu
 # shellcheck disable=SC1091
 [ -f files/alpinewifi.env ] && . ./files/alpinewifi.env
 FINISH=${FINISH:-reboot}
@@ -30,8 +31,12 @@ until timeout 8 wget -q -T 5 -O /dev/null http://dl-cdn.alpinelinux.org/alpine/ 
   sleep 5
 done
 
-say "2/7 Installing Wi-Fi tools, Realtek firmware and firewall (1-5 min)..."
-PKGS="iw wpa_supplicant wireless-regdb linux-firmware-rtlwifi linux-firmware-other iptables openssh chrony"
+say "2/7 Installing Wi-Fi tools, firmware for all common USB Wi-Fi chips, and the firewall (1-5 min)..."
+# firmware for every USB Wi-Fi driver in Alpine's kernel (see wifi-drivers.txt); about 55 MB
+FIRMWARE="linux-firmware-rtlwifi linux-firmware-rtw88 linux-firmware-rtw89 linux-firmware-mediatek
+  linux-firmware-ath9k_htc linux-firmware-other linux-firmware-brcm linux-firmware-libertas
+  linux-firmware-ath6k linux-firmware-rsi zd1211-firmware"
+PKGS="iw wpa_supplicant wireless-regdb iptables openssh chrony $FIRMWARE"
 n=0
 run apk update
 # shellcheck disable=SC2086
@@ -43,8 +48,21 @@ until run timeout 600 apk add --no-progress $PKGS; do
   run apk update
 done
 
+# the chosen dongle's firmware, if it isn't one of the packages above (e.g. Marvell's large package)
+fwpkg=$(awk -F'|' -v d="$ADAPTER_DRIVER" '$1 == d { print $3 }' files/wifi-drivers.txt 2>/dev/null)
+fwpkg=${fwpkg%% *}
+case "$fwpkg" in
+  linux-firmware-*|zd1211-firmware)
+    if ! apk info -e "$fwpkg" >/dev/null 2>&1; then
+      say "    adding the firmware for $ADAPTER_DRIVER: $fwpkg"
+      run timeout 900 apk add --no-progress "$fwpkg" || die "couldn't install $fwpkg for $ADAPTER_DRIVER (details in $LOG)"
+    fi ;;
+esac
+
 say "3/7 Installing the Wi-Fi helpers..."
-install -m 755 files/wifi-join files/wifi-scan-list files/wifi-keepalive /usr/local/bin/ || die "couldn't copy the helpers"
+install -m 755 files/wifi-join files/wifi-scan-list files/wifi-keepalive files/wifi-adapter-info /usr/local/bin/ || die "couldn't copy the helpers"
+mkdir -p /usr/local/share/alpinewifi
+cp files/wifi-drivers.txt /usr/local/share/alpinewifi/ 2>/dev/null
 mkdir -p /etc/wpa_supplicant
 [ -f /etc/wpa_supplicant/wpa_supplicant.conf ] || printf "ctrl_interface=/var/run/wpa_supplicant\nupdate_config=1\ncountry=IN\n" > /etc/wpa_supplicant/wpa_supplicant.conf
 chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf
@@ -78,19 +96,21 @@ run rc-service crond restart
 run rc-update -u
 
 say "7/7 Checking everything..."
-modinfo rtl8xxxu >/dev/null 2>&1          || die "the rtl8xxxu Wi-Fi driver is missing from the kernel (is linux-lts installed?)"
-ls /lib/firmware/rtlwifi/rtl8188eufw.bin* >/dev/null 2>&1 || die "the Realtek firmware file is missing"
+modinfo "$ADAPTER_DRIVER" >/dev/null 2>&1 || die "the $ADAPTER_DRIVER Wi-Fi driver is missing from the kernel (is linux-lts installed?)"
+case "$fwpkg" in
+  linux-firmware-*|zd1211-firmware) apk info -e "$fwpkg" >/dev/null 2>&1 || die "the firmware package $fwpkg for $ADAPTER_DRIVER isn't installed" ;;
+esac
 iptables -t nat -C POSTROUTING -o wlan0 -j MASQUERADE 2>/dev/null || die "the NAT rule isn't active"
 [ "$(cat /proc/sys/net/ipv4/ip_forward)" = 1 ] || die "IP forwarding is off"
 grep -q wifi-keepalive /etc/crontabs/root  || die "the keepalive job wasn't added"
-say "    driver rtl8xxxu: OK, firmware: OK, NAT: OK, forwarding: OK, keepalive: OK"
-modprobe rtl8xxxu 2>/dev/null
+say "    driver $ADAPTER_DRIVER: OK, firmware: OK, NAT: OK, forwarding: OK, keepalive: OK"
+modprobe "$ADAPTER_DRIVER" 2>/dev/null
 sleep 2
-if [ -e /sys/class/net/wlan0 ]; then
-  say "    Wi-Fi adapter: found ($(dmesg | grep -o 'RTL8188[A-Z]*' | tail -1))"
-else
-  say "    Wi-Fi adapter: not connected right now (that's fine during setup)"
-fi
+summary=$(/usr/local/bin/wifi-adapter-info 2>/dev/null | tail -1)
+case "$summary" in
+  "ADAPTER ok"*) say "    Wi-Fi dongle: working (${summary#ADAPTER ok })" ;;
+  *)             say "    Wi-Fi dongle: not ready right now (${summary#ADAPTER }) - fine during setup" ;;
+esac
 
 rm -f /etc/local.d/alpinewifi-firstboot.start
 say "PHASE2 DONE boot=$(cat /proc/sys/kernel/random/boot_id)"

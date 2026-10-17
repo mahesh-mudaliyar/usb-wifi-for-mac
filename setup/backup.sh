@@ -2,7 +2,7 @@
 # Backs up the working Alpine Wi-Fi machine to ~/Mac Wi-Fi Backups and keeps the newest 3.
 # Wi-Fi pauses for 1-2 minutes while the machine is copied; the Mac uses the phone meanwhile.
 # The backup holds your saved Wi-Fi passwords and the SSH key, so it's readable only by you.
-# Run directly (shortcut 5) or source it and call backup_vm.
+# Run directly (shortcut 6) or source it and call backup_vm.
 
 [ -n "${MW_SETUP_DIR:-}" ] || . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 

@@ -80,7 +80,10 @@ make_installer_cd() {
 write_vmx() {
   local mac usb=""
   mac=$(printf '00:50:56:%02x:%02x:%02x' $((RANDOM % 64)) $((RANDOM % 256)) $((RANDOM % 256)))
-  [ "${MACWIFI_TEST:-0}" = 1 ] || usb="usb.autoConnect.device0 = \"$ADAPTER_USB_ID\""
+  # VMware hands the chosen USB Wi-Fi dongle to Alpine automatically (test machines only if asked to)
+  if [ "${MACWIFI_TEST:-0}" != 1 ] || [ "${MACWIFI_TEST_ADAPTER:-0}" = 1 ]; then
+    usb="usb.autoConnect.device0 = \"$(adapter_vmx_value)\""
+  fi
   cat > "$VMX" <<EOF
 .encoding = "UTF-8"
 config.version = "8"
@@ -218,7 +221,7 @@ phase3_finish() {
     alpine_check
   fi
   if [ "$MW_MISSING" = "" ]; then
-    ok "Checked inside Alpine: Wi-Fi driver, Realtek firmware, NAT, forwarding, keepalive, helpers"; return 0
+    ok "Checked inside Alpine: Wi-Fi driver ($ADAPTER_DRIVER), firmware, NAT, forwarding, keepalive, helpers"; return 0
   fi
   warn "Alpine is still missing:$MW_MISSING"
   return 1
@@ -229,8 +232,9 @@ alpine_check() {
   local res tries
   for tries in 1 2 3 4 5 6; do     # services may still be starting just after SSH answers
     # shellcheck disable=SC2016  # runs inside Alpine
-    res=$(alp -- 'f=""; modinfo rtl8xxxu >/dev/null 2>&1 || f="$f driver";
-      ls /lib/firmware/rtlwifi/rtl8188eufw.bin* >/dev/null 2>&1 || f="$f firmware";
+    res=$(alp -- "D=$ADAPTER_DRIVER; "'f=""; modinfo "$D" >/dev/null 2>&1 || f="$f driver-$D";
+      [ -d /lib/firmware/rtlwifi ] && [ -d /lib/firmware/mediatek ] || f="$f firmware";
+      [ -x /usr/local/bin/wifi-adapter-info ] || f="$f wifi-adapter-info";
       iptables -t nat -C POSTROUTING -o wlan0 -j MASQUERADE 2>/dev/null || f="$f NAT";
       [ "$(cat /proc/sys/net/ipv4/ip_forward)" = 1 ] || f="$f forwarding";
       grep -q wifi-keepalive /etc/crontabs/root || f="$f keepalive";
@@ -260,6 +264,10 @@ build_vm() {
   why "Alpine is a tiny Linux that drives the USB Wi-Fi adapter and shares its internet with the Mac."
   why "It installs by itself in 3 phases (about 5-25 min in total, mostly downloads); you don't need to type anything."
   [ -x "$VMRUN" ] || fail "VMware Fusion isn't installed."
+  if [ "${MACWIFI_TEST_ADAPTER:-0}" = 1 ] && "$VMRUN" list 2>/dev/null | grep -qxF "$VMS_DIR/Alpine WiFi.vmwarevm/Alpine WiFi.vmx"; then
+    fail "The real Alpine WiFi machine is running and using the dongle." \
+         "A test machine must not take it away. Turn Wi-Fi off with shortcut 3 first, or test without MACWIFI_TEST_ADAPTER=1."
+  fi
   command -v xorriso >/dev/null || fail "xorriso is missing." "Run: brew install xorriso"
   local p; p=$(build_phase)
   if [ -d "$VM_DIR" ] && [ "$p" = none ]; then
@@ -286,7 +294,7 @@ build_vm() {
   fi
   if [ "$p" = 1 ]; then
     step "Phase 2 of 3: Wi-Fi driver and router setup (limit $(fmt_dur $PHASE2_LIMIT))"
-    why "First start from the new disk: downloads the Realtek firmware and Wi-Fi tools, sets up NAT."
+    why "First start from the new disk: downloads Wi-Fi tools and firmware for all common USB Wi-Fi chips, sets up NAT."
     vmx_set sata0:1.startConnected FALSE
     vmx_set ethernet0.connectionType nat
     watch_phase 2 "$PHASE2_LIMIT" /root/alpinewifi-install.log

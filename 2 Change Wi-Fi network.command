@@ -10,6 +10,10 @@ if ! "${SSH[@]}" true 2>/dev/null; then
   read -r -p "Press Return to close." _; exit 1
 fi
 
+# which bands the dongle can use, e.g. "2.4GHz" or "2.4GHz+5GHz"
+BANDS=$("${SSH[@]}" '/usr/local/bin/wifi-adapter-info 2>/dev/null | tail -1' 2>/dev/null | awk '$2 == "ok" {print $5}')
+[ -n "$BANDS" ] && echo "Your Wi-Fi dongle can use: $BANDS"
+
 while true; do
   echo
   echo "Current Wi-Fi: $("${SSH[@]}" "iw dev wlan0 link | sed -n 's/^[[:space:]]*SSID: //p'" 2>/dev/null || true)"
@@ -18,7 +22,7 @@ while true; do
   names=(); i=0
   echo
   if [ -z "$list" ]; then
-    echo "  No networks found. (This adapter only sees 2.4 GHz networks.)"
+    echo "  No networks found. (This dongle sees: ${BANDS:-unknown bands}.)"
   else
     printf "  %-3s %-34s %-8s %s\n" "#" "Network" "Signal" "Lock"
     while IFS='|' read -r sig sec name; do

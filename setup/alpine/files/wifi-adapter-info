@@ -1,0 +1,44 @@
+#!/bin/sh
+# Explains what Alpine sees of the USB Wi-Fi dongle: USB devices, which driver took them,
+# the Wi-Fi interface and its bands, and firmware problems. The last line is a summary for scripts:
+#   ADAPTER ok <interface> <driver> <bands>    ADAPTER firmware <driver> <file>
+#   ADAPTER nodriver <vendor:product>          ADAPTER none
+usb_nodriver=""
+for d in /sys/bus/usb/devices/*; do
+  [ -f "$d/idVendor" ] || continue
+  id="$(cat "$d/idVendor"):$(cat "$d/idProduct")"
+  case "$id" in 1d6b:*|0e0f:*) continue ;; esac          # Linux root hubs, VMware's own virtual devices
+  [ "$(cat "$d/bDeviceClass" 2>/dev/null)" = 09 ] && continue   # USB hubs
+  prod=$(cat "$d/product" 2>/dev/null)
+  drv=""
+  for i in "$d"/*:*; do [ -e "$i/driver" ] && drv=$(basename "$(readlink "$i/driver")"); done
+  echo "USB device $id ${prod:-(no name)} - driver: ${drv:-none}"
+  [ -z "$drv" ] && usb_nodriver="$usb_nodriver $id"
+done
+
+iface="" idrv="" bands=""
+for n in /sys/class/net/*; do
+  [ -e "$n/phy80211" ] || continue
+  iface=$(basename "$n")
+  idrv=$(basename "$(readlink "$n/device/driver" 2>/dev/null)" 2>/dev/null)
+  phy=$(basename "$(readlink "$n/phy80211")")
+  bands=$(iw phy "$phy" info 2>/dev/null | sed -n 's/^[[:space:]]*Band \([0-9]*\):.*/\1/p' |
+          sed 's/^1$/2.4GHz/; s/^2$/5GHz/; s/^4$/6GHz/; s/^3$/60GHz/' | tr '\n' '+' | sed 's/+$//')
+  echo "Wi-Fi interface $iface - driver: ${idrv:-?} - bands: ${bands:-?}"
+  break
+done
+
+fw=$(dmesg 2>/dev/null | grep -iE 'Direct firmware load for .* failed|firmware: failed to load|failed to load firmware' | tail -1)
+[ -n "$fw" ] && echo "Firmware problem: $fw"
+
+if [ -n "$iface" ]; then
+  echo "ADAPTER ok $iface ${idrv:-unknown} ${bands:-unknown}"
+elif [ -n "$fw" ]; then
+  file=$(echo "$fw" | sed -n 's/.*Direct firmware load for \([^ ]*\) failed.*/\1/p')
+  drvname=$(echo "$fw" | sed -n 's/^\[[^]]*\] *\([^ :]*\).*/\1/p')
+  echo "ADAPTER firmware ${drvname:-unknown} ${file:-unknown}"
+elif [ -n "$usb_nodriver" ]; then
+  echo "ADAPTER nodriver$(echo "$usb_nodriver" | awk '{print " " $1}')"
+else
+  echo "ADAPTER none"
+fi

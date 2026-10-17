@@ -8,15 +8,23 @@ IF=$(ifconfig | awk -v h="$HOSTIP" '/^[a-z]/{i=$1; sub(":","",i)} $1=="inet" && 
 ST=/var/run/alpinewifi
 MUTA=/usr/local/libexec/muta/muta
 DISABLED="__USER_HOME__/.alpinewifi-disabled"
+SWITCHNOW="__USER_HOME__/.alpinewifi-switchnow"   # created by the "phone to Wi-Fi" shortcut: switch on the first good check
 mkdir -p $ST
 
 log() { logger -t alpinewifi "$*"; echo "$(date '+%F %T') $*" >> /var/log/alpinewifi.log; }
+step() { echo "$*" > $ST/step; }
+# Hard limit: a run must never hang - a stuck run blocks all switching
+# shellcheck disable=SC2046  # the process-group number must not be quoted (it's "-" + a number)
+( sleep 40; log "run stopped after 40 s, it was stuck at: $(cat "$ST/step" 2>/dev/null)"; kill -9 -- -$(ps -o pgid= -p $$ | tr -d " ") 2>/dev/null ) &
+TIMER=$!
+trap 'kill $TIMER 2>/dev/null' EXIT
 
 # VMware's network isn't up yet (just booted, Fusion services starting)
 [ -n "$IF" ] && ifconfig "$IF" >/dev/null 2>&1 || exit 0
 
 to_alpine_ok() { route -n get $GW 2>/dev/null | grep -q "interface: $IF"; }
 ensure_subnet() {
+  step "ensure_subnet"
   to_alpine_ok && return
   # 1. remove wrong cached routes to Alpine, including ones tied to another interface (e.g. the phone's utun)
   for i in $(ifconfig -l); do route -n delete -host $GW -ifscope "$i" >/dev/null 2>&1; done
@@ -33,6 +41,7 @@ ensure_subnet() {
   log "still no route to Alpine: $(route -n get $GW 2>&1 | grep -E 'gateway|interface|flags' | tr -s ' \n' ' ')"
 }
 ensure_scoped_default() {
+  step "ensure_scoped_default"
   # VMware adds a gateway-less default on bridge101; point it at Alpine instead
   if [ "$(route -n get -ifscope "$IF" default 2>/dev/null | awk '/gateway/{print $2}')" != "$GW" ]; then
     route -n delete -ifscope "$IF" default >/dev/null 2>&1
@@ -40,15 +49,18 @@ ensure_scoped_default() {
   fi
 }
 flush_rejects() {
+  step "flush_rejects"
   # cached "host down" routes left over from a broken moment
   netstat -rn -f inet | awk -v i="$IF" '$4==i && $3 ~ /R/ {print $1}' | while read -r h; do route -n delete -host "$h" >/dev/null 2>&1; done
 }
 ensure_usb_default() {
+  step "ensure_usb_default"
   route -n get default >/dev/null 2>&1 && return
   g=$($MUTA status 2>/dev/null | awk '/^gateway/{print $2}')
   [ -n "$g" ] && route -n add default "$g" >/dev/null 2>&1
 }
 wifi_ok() {
+  step "wifi_ok"
   # Real internet through Alpine, without DNS, that a Wi-Fi login page can't fake (TLS to an IP)
   ping -c1 -t2 $GW >/dev/null 2>&1 || { echo "Alpine not reachable" > $ST/reason; return 1; }
   flush_rejects   # don't let failures cached while Alpine was still booting block this test
@@ -60,6 +72,7 @@ active() {
   printf 'show State:/Network/Service/AlpineWiFi/IPv4\n' | scutil | grep -q Router
 }
 use_wifi() {
+  step "use_wifi"
   scutil <<EOF
 d.init
 d.add Addresses * $HOSTIP
@@ -77,6 +90,7 @@ EOF
   ensure_subnet; ensure_scoped_default; flush_rejects
 }
 use_usb() {
+  step "use_usb"
   scutil <<EOF
 remove State:/Network/Service/AlpineWiFi/IPv4
 remove State:/Network/Service/AlpineWiFi/DNS
@@ -88,6 +102,7 @@ bump()  { n=$(( $(cat "$ST/$1" 2>/dev/null || echo 0) + 1 )); echo $n > "$ST/$1"
 reset() { echo 0 > "$ST/$1"; }
 
 ensure_subnet
+[ -f "$SWITCHNOW" ] && [ -n "$(find "$SWITCHNOW" -mmin +5 2>/dev/null)" ] && rm -f "$SWITCHNOW"
 ensure_scoped_default
 
 if [ -f "$DISABLED" ]; then
@@ -98,13 +113,28 @@ fi
 
 if wifi_ok; then
   reset bad
-  if ! active && [ "$(bump good)" -ge 2 ]; then use_wifi; reset good; log "switched Mac to Wi-Fi ($(( $(date +%s) - $(sysctl -n kern.boottime | awk -F'[ ,]+' '{print $4}') ))s after boot)"; fi
+  if active; then
+    rm -f "$SWITCHNOW"
+    # Alpine restarting makes macOS drop the Mac's main route even though Wi-Fi is preferred - put it back
+    if [ "$(route -n get default 2>/dev/null | awk '/gateway/{print $2}')" != "$GW" ]; then
+      step "restore main route"
+      use_wifi
+      [ "$(route -n get default 2>/dev/null | awk '/gateway/{print $2}')" = "$GW" ] || { route -n delete default >/dev/null 2>&1; route -n add default $GW >/dev/null 2>&1; }
+      log "Mac's main route had gone missing - restored it to Wi-Fi (now: $(route -n get default 2>/dev/null | awk '/gateway/{print $2}'))"
+    fi
+  elif [ -f "$SWITCHNOW" ]; then
+    use_wifi; reset good; rm -f "$SWITCHNOW"; log "switched Mac to Wi-Fi (asked for by the phone-to-Wi-Fi shortcut)"
+  elif [ "$(bump good)" -ge 2 ]; then
+    use_wifi; reset good; log "switched Mac to Wi-Fi ($(( $(date +%s) - $(sysctl -n kern.boottime | awk -F'[ ,]+' '{print $4}') ))s after boot)"
+  fi
 else
   reset good
   # note why Wi-Fi isn't usable, once per change of reason
   r=$(cat $ST/reason 2>/dev/null); [ "$r" != "$(cat $ST/lastreason 2>/dev/null)" ] && { ! active && log "Wi-Fi not usable yet: $r"; echo "$r" > $ST/lastreason; }
   if active; then
-    if [ "$(bump bad)" -ge 2 ]; then use_usb; reset bad; log "Wi-Fi has no internet, switched Mac to phone USB"; fi
+    # if the Mac has no route at all, don't wait for a second failed check
+    if ! route -n get default >/dev/null 2>&1; then use_usb; reset bad; log "Wi-Fi down and Mac had no route at all - switched Mac to phone USB right away"
+    elif [ "$(bump bad)" -ge 2 ]; then use_usb; reset bad; log "Wi-Fi has no internet, switched Mac to phone USB"; fi
   else
     ensure_usb_default
   fi

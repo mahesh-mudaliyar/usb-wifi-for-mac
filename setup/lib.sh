@@ -28,7 +28,6 @@ ALPINE_ISO_URL="https://dl-cdn.alpinelinux.org/alpine/$ALPINE_BRANCH/releases/aa
 
 HOST_IP=192.168.235.1          # the Mac's side of VMware's "Private to my Mac" network (vmnet1)
 HOST_SUBNET=192.168.235.0
-ADAPTER_USB_ID="vid:0x0bda pid:0x8179"   # Realtek RTL8188EU "802.11n NIC"
 
 # MACWIFI_TEST=1 builds a separate test machine that never touches the real one.
 if [ "${MACWIFI_TEST:-0}" = 1 ]; then
@@ -191,11 +190,34 @@ lease_ip() {
 
 internet_ok() { curl -s -o /dev/null --max-time 6 https://www.apple.com || curl -s -o /dev/null --max-time 6 https://1.1.1.1; }
 
-# make_alpine_bundle DIR  - puts install.sh + files/ (with this machine's address) in DIR
+# ---------- the USB Wi-Fi dongle Alpine uses ----------
+# Saved in ~/.alpinewifi-adapter (ID=, DRIVER=, NAME= lines) by check-wifi.sh.
+# Without that file: the RTL8188EU this setup was first built for.
+ADAPTER_CONF="$HOME/.alpinewifi-adapter"
+load_adapter() {
+  ADAPTER_ID=0bda:8179 ADAPTER_DRIVER=rtl8xxxu ADAPTER_NAME="Realtek 802.11n NIC (RTL8188EU)"
+  [ -f "$ADAPTER_CONF" ] || return 0
+  local id drv name
+  id=$(sed -n 's/^ID=//p' "$ADAPTER_CONF" | head -1)
+  drv=$(sed -n 's/^DRIVER=//p' "$ADAPTER_CONF" | head -1)
+  name=$(sed -n 's/^NAME=//p' "$ADAPTER_CONF" | head -1)
+  if printf '%s' "$id" | grep -qE '^[0-9a-f]{4}:[0-9a-f]{4}$' && printf '%s' "$drv" | grep -qE '^[a-z0-9_]+$'; then
+    ADAPTER_ID=$id ADAPTER_DRIVER=$drv ADAPTER_NAME=${name:-$id}
+  else
+    log "ignored a damaged $ADAPTER_CONF"
+  fi
+}
+save_adapter() { printf 'ID=%s\nDRIVER=%s\nNAME=%s\n' "$ADAPTER_ID" "$ADAPTER_DRIVER" "$ADAPTER_NAME" > "$ADAPTER_CONF"; }
+adapter_vmx_value() { printf 'vid:0x%s pid:0x%s' "${ADAPTER_ID%%:*}" "${ADAPTER_ID##*:}"; }
+load_adapter
+
+# make_alpine_bundle DIR  - puts install.sh + files/ (with this machine's address and dongle) in DIR
 make_alpine_bundle() {
   mkdir -p "$1/files" || return 1
   cp "$MW_SETUP_DIR/alpine/install.sh" "$1/" && cp "$MW_SETUP_DIR/alpine/files/"* "$1/files/" || return 1
-  printf 'ALPINE_IP=%s\nHOST_NET=%s/24\n' "$ALPINE_IP" "$HOST_SUBNET" > "$1/files/alpinewifi.env"
+  cp "$MW_SETUP_DIR/data/wifi-drivers.txt" "$1/files/" || return 1
+  printf 'ALPINE_IP=%s\nHOST_NET=%s/24\nADAPTER_ID=%s\nADAPTER_DRIVER=%s\n' \
+    "$ALPINE_IP" "$HOST_SUBNET" "$ADAPTER_ID" "$ADAPTER_DRIVER" > "$1/files/alpinewifi.env"
   chmod 755 "$1/install.sh" "$1/files/"wifi-*
 }
 

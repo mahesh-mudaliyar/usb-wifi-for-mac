@@ -1,5 +1,5 @@
 #!/bin/bash
-# Restores the Alpine Wi-Fi machine from a backup made by shortcut 5 (backup.sh).
+# Restores the Alpine Wi-Fi machine from a backup made by shortcut 6 (backup.sh).
 # Usage: restore.sh [backup-file]   - without a file it offers the backups in ~/Mac Wi-Fi Backups.
 # The machine folder must not exist yet (install-all.sh moves a broken one aside first).
 # Source it and call restore_vm, or run it directly.

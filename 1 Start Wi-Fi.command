@@ -13,14 +13,35 @@ main_gw() { route -n get default 2>/dev/null | awk '/gateway/{print $2}'; }
 main_if() { route -n get default 2>/dev/null | awk '/interface/{print $2}'; }
 
 echo "=== Turning on Wi-Fi ==="
-rm -f "$HOME/.alpinewifi-disabled"
-
-# 1. VMware and the Wi-Fi adapter
-[ -x "$VR" ] || fail "VMware Fusion isn't installed in Applications."
-if ioreg -p IOUSB -l -w0 2>/dev/null | grep -q '"USB Product Name" = "802.11n NIC"' || "$VR" list 2>/dev/null | grep -qxF "$V/Alpine WiFi.vmx"; then
-  ok "Wi-Fi adapter detected"
+if [ -f "$HOME/.alpinewifi-disabled" ]; then
+  info "Wi-Fi was turned OFF (shortcut 3, since $(stat -f '%Sm' -t '%d %b %H:%M' "$HOME/.alpinewifi-disabled" 2>/dev/null)) - turning it back ON"
+  rm -f "$HOME/.alpinewifi-disabled"
 else
-  info "Wi-Fi adapter not seen on USB - check it's plugged in (continuing anyway)"
+  ok "Wi-Fi setting is ON"
+fi
+
+# the USB Wi-Fi dongle chosen by "Check Wi-Fi hardware" (default: the original RTL8188EU)
+AID=$(sed -n 's/^ID=//p' "$HOME/.alpinewifi-adapter" 2>/dev/null | head -1); AID=${AID:-0bda:8179}
+ANAME=$(sed -n 's/^NAME=//p' "$HOME/.alpinewifi-adapter" 2>/dev/null | head -1); ANAME=${ANAME:-USB Wi-Fi dongle}
+on_usb() { ioreg -p IOUSB -l -w0 2>/dev/null | awk -v v=$((16#${AID%%:*})) -v p=$((16#${AID##*:})) '
+  /"idVendor" = / { cv = $NF } /"idProduct" = / { if (cv == v && $NF == p) f = 1 } END { exit !f }'; }
+# why_no_wlan  - asks Alpine what it sees of the dongle and explains it
+why_no_wlan() {
+  local s; s=$("${SSH[@]}" '/usr/local/bin/wifi-adapter-info 2>/dev/null | tail -1' 2>/dev/null)
+  case "$s" in
+    "ADAPTER firmware"*) echo "Alpine has a driver for the dongle, but its firmware is missing (${s#ADAPTER firmware }). Run 'Install Mac Wi-Fi' with internet available." ;;
+    "ADAPTER nodriver"*) echo "Alpine sees USB device ${s#ADAPTER nodriver } but has no Linux driver for it - this dongle won't work. See docs/WIFI-ADAPTERS.md." ;;
+    "ADAPTER none"*)     echo "Alpine doesn't see the dongle. Unplug it, plug it back in, and try again. If you changed dongles, run 'Check Wi-Fi hardware' first." ;;
+    *)                   echo "Alpine can't see the Wi-Fi dongle. Unplug it, plug it back in, and try again." ;;
+  esac
+}
+
+# 1. VMware and the Wi-Fi dongle
+[ -x "$VR" ] || fail "VMware Fusion isn't installed in Applications."
+if on_usb || "$VR" list 2>/dev/null | grep -qxF "$V/Alpine WiFi.vmx"; then
+  ok "Wi-Fi dongle: $ANAME ($AID)"
+else
+  info "$ANAME ($AID) not seen on USB - check it's plugged in (continuing anyway)"
 fi
 
 # 2. Alpine machine
@@ -41,11 +62,11 @@ ok "Alpine is up"
 
 # 4. Wi-Fi adapter inside Alpine
 "${SSH[@]}" '[ -e /sys/class/net/wlan0 ]' 2>/dev/null || {
-  info "Waiting for the Wi-Fi adapter to appear in Alpine..."
+  info "Waiting for the Wi-Fi dongle to appear in Alpine..."
   for i in $(seq 1 15); do "${SSH[@]}" '[ -e /sys/class/net/wlan0 ]' 2>/dev/null && break; sleep 2; done
-  "${SSH[@]}" '[ -e /sys/class/net/wlan0 ]' 2>/dev/null || fail "Alpine can't see the Wi-Fi adapter. Unplug it, plug it back in, and try again."
+  "${SSH[@]}" '[ -e /sys/class/net/wlan0 ]' 2>/dev/null || fail "$(why_no_wlan)"
 }
-ok "Wi-Fi adapter working in Alpine"
+ok "Wi-Fi dongle working in Alpine"
 
 # 5. Join Wi-Fi
 "${SSH[@]}" 'grep -q "^network=" /etc/wpa_supplicant/wpa_supplicant.conf' 2>/dev/null || fail "No Wi-Fi network saved yet. Use \"2 Change Wi-Fi network\" to pick one."
@@ -61,7 +82,8 @@ for i in $(seq 1 80); do
   sleep 3
 done
 [ -n "$addr" ] || fail "Couldn't join a saved Wi-Fi network. Is it in range? Use \"2 Change Wi-Fi network\" to search and pick one."
-ok "Connected to \"$ssid\"  (signal $sig, address $addr)"
+case "$sig" in ""|0*) sigtxt="" ;; *) sigtxt="signal $sig, " ;; esac
+ok "Connected to \"$ssid\"  (${sigtxt}address $addr)"
 
 # 6. Internet through Wi-Fi
 if "${SSH[@]}" 'ping -c1 -W3 1.1.1.1 >/dev/null 2>&1 || ping -c1 -W3 8.8.8.8 >/dev/null 2>&1' 2>/dev/null; then

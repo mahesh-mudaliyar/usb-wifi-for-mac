@@ -9,6 +9,7 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 . "$MW_SETUP_DIR/build-vm.sh"
 . "$MW_SETUP_DIR/restore.sh"
+. "$MW_SETUP_DIR/check-wifi.sh"
 
 APP_SUPPORT="$HOME/Library/Application Support/Mac Wi-Fi"
 LAUNCH_AGENT="$HOME/Library/LaunchAgents/com.alpinewifi.autostart.plist"
@@ -27,7 +28,8 @@ This sets up internet for this Mac through the small USB Wi-Fi adapter, with the
 phone's USB tethering as an automatic backup. It installs or repairs:
 
   - VMware Fusion check, Homebrew tools, and muta (phone USB tethering)
-  - "Alpine WiFi": a tiny hidden Linux machine that drives the USB Wi-Fi adapter
+  - a check of this Mac's own Wi-Fi and of your USB Wi-Fi dongle (is there a Linux driver?)
+  - "Alpine WiFi": a tiny hidden Linux machine that drives the USB Wi-Fi dongle
   - the Mac services that switch between Wi-Fi and the phone by themselves
   - the shortcuts in ~/Desktop/Mac Wi-Fi
 
@@ -59,6 +61,35 @@ check_mac() {
     wait_until 600 "internet" "Still nothing - check the phone's USB tethering is on." internet_ok \
       || fail "No internet after 10 minutes." "Connect the Mac to the internet, then run the installer again."
     ok "Internet is working"
+  fi
+}
+
+check_wifi_hardware() {
+  step "This Mac's own Wi-Fi"
+  why "First: if the built-in Wi-Fi works, you don't need any of this."
+  wifi_check_builtin
+  wifi_report_builtin
+  if wifi_builtin_offer_on; then MW_BUILTIN_STATE=connected; fi
+  case "$MW_BUILTIN_STATE" in
+    connected|on-idle)
+      ask_yes_no "Set up the USB dongle anyway (for example as a second Wi-Fi)?" n 120 \
+        || { echo; ok "Nothing was changed. Use the Wi-Fi menu in the menu bar."; exit 0; } ;;
+    *) wifi_options ;;
+  esac
+
+  step "USB Wi-Fi dongle"
+  why "Alpine's Linux gets the dongle; it needs a Linux driver for that exact dongle (checked against $(grep -vc '^#' "$USB_ID_TABLE") known IDs)."
+  wifi_scan_usb
+  if printf '%s\n' "${MW_USB_KIND[@]}" | grep -qx cdmode; then wifi_report_usb; wifi_cdmode_help; fi
+  wifi_report_usb
+  if wifi_choose_adapter; then return; fi
+  if [ -f "$ADAPTER_CONF" ] || [ -f "$VMX" ]; then
+    warn "Keeping the dongle chosen before: $ADAPTER_NAME ($ADAPTER_ID). (While Alpine is using it, macOS may not list it.)"
+  else
+    warn "No usable USB Wi-Fi dongle is plugged in."
+    why "You can still install now (the phone backup works) and plug a dongle in later,"
+    why "then double-click 'Check Wi-Fi hardware' to hand it to Alpine."
+    ask_yes_no "Continue without a dongle for now?" y 120 || { echo "Nothing was changed."; exit 0; }
   fi
 }
 
@@ -213,7 +244,7 @@ install_shortcuts() {
   step "Shortcuts in ~/Desktop/Mac Wi-Fi"
   local f name stamp; stamp=$(date +%Y%m%d-%H%M%S)
   mkdir -p "$SHORTCUT_DIR"
-  for f in "$MW_PROJECT_DIR"/[0-9]*.command "$MW_PROJECT_DIR/Install Mac Wi-Fi.command"; do
+  for f in "$MW_PROJECT_DIR"/[0-9]*.command "$MW_PROJECT_DIR/Install Mac Wi-Fi.command" "$MW_PROJECT_DIR/Check Wi-Fi hardware.command"; do
     [ -f "$f" ] || continue
     name=$(basename "$f")
     if [ -f "$SHORTCUT_DIR/$name" ] && ! cmp -s "$f" "$SHORTCUT_DIR/$name"; then
@@ -230,6 +261,21 @@ install_shortcuts() {
   ok "Shortcuts updated (older versions kept in $SHORTCUT_DIR/old)"
 }
 
+# explain_adapter  - says why Alpine has no Wi-Fi interface, based on what Alpine itself sees
+explain_adapter() {
+  local s; s=$(alp -- '/usr/local/bin/wifi-adapter-info 2>/dev/null | tail -1' 2>/dev/null)
+  log "adapter state: $s"
+  case "$s" in
+    "ADAPTER firmware"*) warn "Alpine has a driver for the dongle, but its firmware file is missing (${s#ADAPTER firmware })."
+                         why "Run the installer again with internet available, or see 'Firmware missing' in docs/WIFI-ADAPTERS.md." ;;
+    "ADAPTER nodriver"*) warn "Alpine sees a USB device (${s#ADAPTER nodriver }) but has no Linux driver for it."
+                         why "This dongle won't work with this setup - see docs/WIFI-ADAPTERS.md for ones that do." ;;
+    "ADAPTER none"*)     warn "Alpine doesn't see any USB Wi-Fi dongle: VMware hasn't handed it over."
+                         why "Check it's plugged in, then double-click 'Check Wi-Fi hardware' to hand it to Alpine." ;;
+    *)                   warn "Couldn't ask Alpine about the dongle${s:+ ($s)}." ;;
+  esac
+}
+
 resume_wifi() {
   step "Turn Wi-Fi on"
   if [ "$MW_WAS_DISABLED" = yes ]; then
@@ -240,15 +286,17 @@ resume_wifi() {
   vm_start || fail "VMware couldn't start Alpine." "Double-click '1 Start Wi-Fi' to see why."
   wait_until 150 "Alpine to answer" "Open VMware Fusion to see if it's stuck." alp_up || fail "Alpine isn't answering." "Double-click '0 Which internet am I on' and check the log."
   ok "Alpine is running (hidden)"
-  if ! wait_until 60 "the USB Wi-Fi adapter inside Alpine" "" alp_has_wlan; then
-    warn "Alpine can't see the USB Wi-Fi adapter."
-    pause_for_user "Plug in the USB Wi-Fi adapter. If it's already in: unplug it, wait 5 s, and plug it back in."
-    if ! wait_until 90 "the USB Wi-Fi adapter" "In VMware Fusion: Virtual Machine > USB > connect 'Realtek 802.11n NIC'." alp_has_wlan; then
-      warn "Still no adapter. Everything else is installed - plug it in later and use '1 Start Wi-Fi'."
+  if ! wait_until 60 "the USB Wi-Fi dongle inside Alpine" "" alp_has_wlan; then
+    explain_adapter
+    pause_for_user "Plug in the USB Wi-Fi dongle ($ADAPTER_NAME). If it's already in: unplug it, wait 5 s, and plug it back in."
+    if ! wait_until 90 "the USB Wi-Fi dongle" "In VMware Fusion: Virtual Machine > USB > connect '$ADAPTER_NAME'." alp_has_wlan; then
+      explain_adapter
+      warn "Everything else is installed. Fix the dongle as described, then use '1 Start Wi-Fi'."
       MW_NO_ADAPTER=yes; return
     fi
   fi
-  ok "USB Wi-Fi adapter working inside Alpine ($(alp -- "dmesg | grep -o 'RTL8188[A-Z]*' | tail -1" 2>/dev/null))"
+  local s; s=$(alp -- '/usr/local/bin/wifi-adapter-info | tail -1' 2>/dev/null)
+  ok "USB Wi-Fi dongle working inside Alpine (${s#ADAPTER ok })"
 }
 
 pick_network() {
@@ -278,11 +326,12 @@ finish() {
   cat <<EOF
 
   Your shortcuts are in ~/Desktop/Mac Wi-Fi:
-    0 Which internet am I on    1 Start Wi-Fi           2 Change Wi-Fi network
-    3 Stop Wi-Fi and use phone  4 Use phone USB tethering
-    5 Back up Wi-Fi machine     Install Mac Wi-Fi (run again any time to repair)
+    0 Which internet am I on      1 Start Wi-Fi             2 Change Wi-Fi network
+    3 Stop Wi-Fi and use phone    4 Use phone USB tethering 5 Switch from phone to Wi-Fi
+    6 Back up Wi-Fi machine       Check Wi-Fi hardware (built-in Wi-Fi + which dongle)
+    Install Mac Wi-Fi (run again any time to repair)
 
-  Tip: once Wi-Fi works, double-click "5 Back up Wi-Fi machine" so a future
+  Tip: once Wi-Fi works, double-click "6 Back up Wi-Fi machine" so a future
   reinstall takes 2 minutes instead of 20.
 EOF
   notify "Mac Wi-Fi setup finished." Glass
@@ -294,12 +343,14 @@ main() {
   fi
   intro
   check_mac
+  check_wifi_hardware
   sudo_start "The Mac password is needed to install the background services and adjust VMware's network."
   check_fusion
   check_tools
   fix_vmware_network
   pause_autostart
   setup_vm
+  apply_adapter_to_vm
   install_mac_services
   install_shortcuts
   resume_wifi

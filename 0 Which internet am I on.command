@@ -14,6 +14,11 @@ curl -s -o /dev/null --max-time 6 https://www.apple.com && echo "Internet:      
 if ssh -n -F "$V/sshcfg" -o ConnectTimeout=3 alp true 2>/dev/null; then
   w=$(ssh -n -F "$V/sshcfg" alp "iw dev wlan0 link | sed -n 's/^[[:space:]]*SSID: //p'; iw dev wlan0 link | sed -n 's/^[[:space:]]*signal: //p'" 2>/dev/null | paste -sd'|' -)
   echo "Wi-Fi network:  ${w%%|*}  (signal ${w##*|})"
+  a=$(ssh -n -F "$V/sshcfg" alp '/usr/local/bin/wifi-adapter-info 2>/dev/null | tail -1' 2>/dev/null)
+  case "$a" in
+    "ADAPTER ok"*) echo "Wi-Fi dongle:   working (${a#ADAPTER ok })" ;;
+    "ADAPTER "*)   echo "Wi-Fi dongle:   PROBLEM (${a#ADAPTER }) - run '1 Start Wi-Fi' for an explanation" ;;
+  esac
 else
   [ -f "$HOME/.alpinewifi-disabled" ] && echo "Wi-Fi:          turned off (shortcut 3). Use shortcut 1 to turn it on." || echo "Wi-Fi:          Alpine machine starting or not running"
 fi

@@ -1,0 +1,34 @@
+# What each Linux USB Wi-Fi driver in Alpine's kernel is for. Used by check-wifi.sh and docs/WIFI-ADAPTERS.md.
+# Format: driver|chips|Alpine firmware package|rating|bands|note
+# rating: good = recommended, ok = works but limited/older, old = very old hardware, no = won't work out of the box
+rtl8xxxu|Realtek RTL8188EU/ETV, RTL8188CU/RU, RTL8188FU/FTV, RTL8192CU/EU/FU, RTL8723BU, RTL8710BU|linux-firmware-rtlwifi|good|2.4 GHz|Tested with RTL8188EU (0bda:8179)
+rtl8192cu|Realtek RTL8188CUS, RTL8192CU (older driver)|linux-firmware-rtlwifi|ok|2.4 GHz|
+rtw88_8821cu|Realtek RTL8811CU, RTL8821CU|linux-firmware-rtw88|good|2.4 + 5 GHz|Many start in "driver CD" mode - eject that CD and they switch to Wi-Fi
+rtw88_8822bu|Realtek RTL8812BU, RTL8822BU|linux-firmware-rtw88|good|2.4 + 5 GHz|
+rtw88_8822cu|Realtek RTL8822CU|linux-firmware-rtw88|good|2.4 + 5 GHz|
+rtw88_8812au|Realtek RTL8812AU|linux-firmware-rtw88|good|2.4 + 5 GHz|
+rtw88_8821au|Realtek RTL8811AU, RTL8821AU|linux-firmware-rtw88|good|2.4 + 5 GHz|
+rtw88_8814au|Realtek RTL8814AU|linux-firmware-rtw88|good|2.4 + 5 GHz|
+rtw88_8723du|Realtek RTL8723DU|linux-firmware-rtw88|ok|2.4 GHz|
+rtw89_8852bu|Realtek RTL8832BU, RTL8852BU (Wi-Fi 6)|linux-firmware-rtw89|good|2.4 + 5 GHz|
+rtw89_8851bu|Realtek RTL8851BU (Wi-Fi 6)|linux-firmware-rtw89|good|2.4 + 5 GHz|
+mt7601u|MediaTek MT7601U|linux-firmware-mediatek|ok|2.4 GHz|Very common cheap "150 Mbps" dongle
+mt76x0u|MediaTek MT7610U|linux-firmware-mediatek|good|2.4 + 5 GHz|
+mt76x2u|MediaTek MT7612U|linux-firmware-mediatek|good|2.4 + 5 GHz|One of the best-supported chips on Linux
+mt7921u|MediaTek MT7921AU (Wi-Fi 6E)|linux-firmware-mediatek|good|2.4 + 5 + 6 GHz|
+rt2800usb|Ralink / MediaTek RT2770, RT2870, RT3070, RT3072, RT3572, RT5370, RT5372, RT5572|linux-firmware-other|ok|2.4 GHz (RT3572/RT5572: + 5 GHz)|
+rt73usb|Ralink RT2571W, RT2671|linux-firmware-other|old|2.4 GHz|
+rt2500usb|Ralink RT2570|(none needed)|old|2.4 GHz|802.11b/g only
+ath9k_htc|Atheros AR9271, AR7010|linux-firmware-ath9k_htc|good|2.4 GHz (AR7010: + 5 GHz)|Open-source firmware, very reliable
+carl9170|Atheros AR9170|linux-firmware-other|old|2.4 + 5 GHz|
+ar5523|Atheros AR5523|linux-firmware-other|old|2.4 + 5 GHz|
+zd1211rw|ZyDAS ZD1211, ZD1211B|zd1211-firmware|old|2.4 GHz|802.11b/g only
+rtl8187|Realtek RTL8187, RTL8187B|(none needed)|old|2.4 GHz|802.11b/g only
+brcmfmac|Broadcom BCM43143, BCM43236, BCM43242, BCM43569 (USB)|linux-firmware-brcm|ok|depends on chip|Rare as USB dongles
+usb8xxx|Marvell 88W8388, 88W8682 (Libertas)|linux-firmware-libertas|old|2.4 GHz|
+libertas_tf_usb|Marvell 88W8388 (thin firmware)|linux-firmware-other|old|2.4 GHz|
+ath6kl_usb|Atheros AR6004|linux-firmware-ath6k|old|2.4 + 5 GHz|
+rsi_usb|Redpine RS9113|linux-firmware-rsi|old|2.4 + 5 GHz|
+mwifiex_usb|Marvell 8766, 8797, 8801, 8997|linux-firmware-mrvl|ok|2.4 + 5 GHz|Its firmware package is large (77 MB); installed only when you choose this dongle
+p54usb|Intersil / Conexant Prism54 USB|not packaged by Alpine|no|2.4 GHz|Firmware isn't available in Alpine
+ath10k_usb|Qualcomm Atheros QCA (USB)|linux-firmware-ath10k|no|2.4 + 5 GHz|The Linux USB support is experimental
