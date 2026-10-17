@@ -14,6 +14,69 @@ A background switcher on the Mac uses Wi-Fi whenever it has internet, and falls 
  Phone ──USB tethering──► muta (utun) ───────────────────────────► backup
 ```
 
+---
+
+## The problem this solves
+
+### The symptom
+
+The Mac's own Wi-Fi is gone, not just "can't connect":
+
+- The Wi-Fi icon in the menu bar is missing, or shows **"Wi-Fi: No hardware installed"**.
+- **System Settings → Wi-Fi** is missing or empty, so there's nothing to switch on.
+- **System Information → Network → Wi-Fi** lists only software versions, with no `en0` interface, no card type and no networks.
+- Often **Bluetooth is dead too**, because on Apple silicon Macs Wi-Fi and Bluetooth share one chip.
+
+On the MacBook Pro (M4) this project was built on:
+- macOS lists **no Wi-Fi port at all**, and `en0` (normally Wi-Fi) is a Thunderbolt port.
+- The Bluetooth controller reports a `NULL` address and firmware `v0`.
+- Both run on the same Broadcom chip (BCM4388), which points to that chip itself having failed.
+
+### Why the usual fixes don't help
+
+- **Restart, safe mode, a new user account, reinstalling macOS:** these fix *software* problems. When macOS can't even see the Wi-Fi chip, the fault is in the hardware, and no setting brings it back.
+- **Repair:** on Apple silicon Macs the Wi-Fi/Bluetooth chip is part of the main logic board. Apple fixes it by replacing the whole board, which is expensive out of warranty.
+
+### Why you can't just plug in a USB Wi-Fi dongle
+
+On Windows or Linux, a cheap USB Wi-Fi dongle would be the end of the story. On a Mac it isn't:
+
+- **macOS has no drivers for USB Wi-Fi dongles.** The Mac only supports Apple's own built-in Wi-Fi chips. Plug in a dongle and nothing happens: no Wi-Fi menu, no new network.
+- **Old Mac drivers don't help.** The few that dongle makers once shipped were kernel extensions for Intel Macs and old macOS versions. They don't load on Apple silicon, and the makers have stopped making them.
+
+So the dongle has to be driven by something that *does* have drivers for it. **Linux** has drivers for almost every USB Wi-Fi chip.
+
+### The other ways to get online, and their catch
+
+| Option | Catch |
+|---|---|
+| Phone USB tethering | Uses mobile data, and the phone has to stay plugged in |
+| USB-C Ethernet adapter | Needs a network cable where you are |
+| Travel router in "client" mode | One more box to carry, power and set up |
+
+These all work, and this project keeps the phone as the automatic backup. But none of them gives you plain Wi-Fi from a small stick in the USB port.
+
+### The workaround
+
+Run a **tiny Linux, hidden on the Mac**, and let *it* use the dongle:
+
+1. **VMware Fusion** runs **Alpine Linux** in the background, with no window and no Dock icon. It uses 192 MB of memory, one processor core, and about 400 MB of disk.
+2. VMware hands the **USB dongle** directly to Alpine. Alpine's Linux driver runs the dongle and joins your Wi-Fi network.
+3. Alpine shares that internet with the Mac over a **private virtual network** that exists only inside this Mac.
+4. A small **switcher** on the Mac makes that connection the Mac's main internet whenever it really works, and falls back to the **phone** when it doesn't.
+
+The Mac sees an ordinary network connection, and every app just works.
+
+### What you give up
+
+- **macOS's Wi-Fi menu doesn't show this connection.** Use the shortcuts instead: `2 Change Wi-Fi network` to pick a network, `0 Which internet am I on` to see the status.
+- **Features that need Apple's own Wi-Fi/Bluetooth chip won't work**, for example AirDrop, wireless Sidecar and other Continuity features. Wi-Fi-based location also stops working.
+- **Hotel and café login pages** can't be shown, because Alpine has no browser. Use the phone in those places.
+- **Wi-Fi takes about 1–2 minutes after a restart**, while Alpine starts and joins the network. The phone covers that gap if it's plugged in.
+- **Speed is limited by the dongle.** For example, the tested RTL8188EU is a 150 Mbps, 2.4 GHz-only chip. Dual-band dongles do much better (see [docs/WIFI-ADAPTERS.md](docs/WIFI-ADAPTERS.md)).
+
+---
+
 > **First, check whether you need this at all.** Double-click **`Check Wi-Fi hardware.command`**. It tells you whether the Mac's own Wi-Fi works, and whether your dongle is supported. The full guide, including the other options (phone, Ethernet, travel router, repair) and which dongles work: **[docs/WIFI-ADAPTERS.md](docs/WIFI-ADAPTERS.md)**.
 
 ---
