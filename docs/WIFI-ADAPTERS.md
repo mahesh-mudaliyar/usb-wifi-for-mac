@@ -75,7 +75,7 @@ That list is generated from the drivers themselves, using [`setup/tools/make-usb
 
 ### Supported chip families
 
-The installer puts firmware for **all** of these onto the Alpine machine, about 55 MB, so you can swap dongles later without reinstalling. Run `Check Wi-Fi hardware` after swapping.
+The installer puts firmware for **all** of these onto the Alpine machine, about 50 MB, so you can swap dongles later without reinstalling. Run `Check Wi-Fi hardware` after swapping.
 
 **Recommended (good):**
 

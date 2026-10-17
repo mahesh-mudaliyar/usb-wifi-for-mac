@@ -32,7 +32,7 @@ until timeout 8 wget -q -T 5 -O /dev/null http://dl-cdn.alpinelinux.org/alpine/ 
 done
 
 say "2/7 Installing Wi-Fi tools, firmware for all common USB Wi-Fi chips, and the firewall (1-5 min)..."
-# firmware for every USB Wi-Fi driver in Alpine's kernel (see wifi-drivers.txt); about 55 MB
+# firmware for every USB Wi-Fi driver in Alpine's kernel (see wifi-drivers.txt); about 50 MB
 FIRMWARE="linux-firmware-rtlwifi linux-firmware-rtw88 linux-firmware-rtw89 linux-firmware-mediatek
   linux-firmware-ath9k_htc linux-firmware-other linux-firmware-brcm linux-firmware-libertas
   linux-firmware-ath6k linux-firmware-rsi zd1211-firmware"
